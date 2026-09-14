@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { authService } from '../services';
+import { LicenseUploadField } from '../components/UploadFields';
 
 const MODES = [
   { id: 'login', label: 'تسجيل الدخول' },
@@ -295,10 +296,10 @@ export default function Auth() {
                   <label className="label-base">كلمة المرور</label>
                   <input type="password" name="password" value={formData.password} onChange={handleChange} placeholder="••••••••" required className="input-base" />
                 </div>
-                <div>
-                  <label className="label-base">رابط صورة الرخصة</label>
-                  <input type="url" name="license_image_url" value={formData.license_image_url} onChange={handleChange} placeholder="https://example.com/license.jpg" required className="input-base" />
-                </div>
+                <LicenseUploadField
+                  value={formData.license_image_url}
+                  onChange={(url) => setFormData((prev) => ({ ...prev, license_image_url: url }))}
+                />
                 <div>
                   <label className="label-base">رقم رخصة الإعلان</label>
                   <input type="text" name="ad_license_no" value={formData.ad_license_no} onChange={handleChange} placeholder="LIC-2024-001" required className="input-base" />

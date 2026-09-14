@@ -24,6 +24,25 @@ export const creditsService = {
   purchase: (pkg) => apiClient.post('/credits/purchase', { package: pkg }),
 };
 
+export const uploadsService = {
+  // files: File[] (listing images, up to 10) — returns { urls: [...] }
+  uploadListingImages: (files) => {
+    const form = new FormData();
+    files.forEach((f) => form.append('images', f));
+    return apiClient.post('/uploads/images', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  // file: File (license image or PDF) — returns { url }
+  uploadLicense: (file) => {
+    const form = new FormData();
+    form.append('license', file);
+    return apiClient.post('/uploads/license', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
+
 export const chatService = {
   listConversations: () => apiClient.get('/conversations'),
   createOrFetch: (listingId) => apiClient.post('/conversations', { listing_id: listingId }),

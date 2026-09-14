@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { listingsService } from '../services';
 import { CITIES } from '../constants/api';
+import { ImageDropzone } from './UploadFields';
 
 const PROPERTY_OPTIONS = [
   { value: 'apartment', label: 'شقة' },
@@ -27,6 +28,7 @@ function FormSection({ label, children }) {
 export default function CreateListingForm({ onCancel, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [imageUrls, setImageUrls] = useState([]);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -37,8 +39,7 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
     price: '',
     size_sqm: '',
     rooms: '',
-    floor: '',
-    images: ''
+    floor: ''
   });
 
   const handleChange = (e) => {
@@ -57,7 +58,7 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
         size_sqm: formData.size_sqm ? parseInt(formData.size_sqm) : null,
         rooms: formData.rooms ? parseInt(formData.rooms) : null,
         floor: formData.floor ? parseInt(formData.floor) : null,
-        images: formData.images ? formData.images.split('\n').filter((url) => url.trim()) : []
+        images: imageUrls
       };
 
       const response = await listingsService.create(data);
@@ -250,18 +251,7 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
         </FormSection>
 
         <FormSection label="الصور">
-          <div>
-            <label className="label-base">روابط صور العقار</label>
-            <textarea
-              name="images"
-              value={formData.images}
-              onChange={handleChange}
-              placeholder={'https://example.com/image1.jpg\nhttps://example.com/image2.jpg'}
-              rows="4"
-              className="input-base resize-none font-mono text-xs"
-            />
-            <p className="form-hint">ضع رابط صورة واحدة في كل سطر — حتى ١٠ صور.</p>
-          </div>
+          <ImageDropzone urls={imageUrls} onUrlsChange={setImageUrls} />
         </FormSection>
 
         <div className="flex flex-col gap-3 border-t border-slate-200/70 pt-6 sm:flex-row">
