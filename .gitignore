@@ -1,0 +1,37 @@
+# --- Dependencies ---
+node_modules/
+
+# --- Environment files (never commit secrets) ---
+.env
+.env.*
+!.env.example
+
+# --- Database files (local SQLite) ---
+*.db
+*.db-journal
+
+# --- Build output ---
+dist/
+dist-ssr/
+
+# --- Archive: superseded code & repo backups, local only ---
+_archive/
+
+# --- User uploads (runtime data) ---
+uploads/*
+!uploads/.gitkeep
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS / editor junk ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.suo
+*.sw?
+
+# --- Claude Code local settings (any depth) ---
+**/.claude/settings.local.json
