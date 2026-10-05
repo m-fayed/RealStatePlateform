@@ -111,3 +111,27 @@ export function serializeBrokerPublic(user) {
     created_at: user.createdAt,
   };
 }
+
+// Credit-purchase transaction. broker_* fields are populated only when the
+// caller's Prisma query includes `broker` (the admin list does; a broker
+// reading their own history doesn't need it).
+export function serializeTransaction(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    broker_id: row.brokerId,
+    broker_name: row.broker?.name ?? null,
+    broker_phone: row.broker?.phone ?? null,
+    package: row.packageId,
+    amount: row.amount,
+    credits: row.credits,
+    method: row.method,
+    status: row.status,
+    sender_number: row.senderNumber ?? null,
+    receipt_url: row.receiptUrl ?? null,
+    rejection_reason: row.rejectionReason ?? null,
+    reviewed_at: row.reviewedAt ?? null,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}

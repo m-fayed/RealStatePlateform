@@ -31,6 +31,7 @@ model User {
   conversationsAsBuyer  Conversation[] @relation("ConversationBuyer")
   conversationsAsBroker Conversation[] @relation("ConversationBroker")
   messagesSent          Message[]      @relation("MessageSender")
+  transactions          Transaction[]  // broker only — credit purchase requests
 
   @@index([role, status])
 }
@@ -100,4 +101,37 @@ model Message {
   createdAt      DateTime @default(now())
 
   @@index([conversationId, createdAt])
+}
+
+// A broker's request to top up listing credits. One row per purchase attempt.
+//
+// Payment methods tailored for Egypt:
+//   - "vodafone_cash" — real, manual: broker transfers to our wallet, enters
+//     their sending number (+ optional receipt), status stays "pending" until
+//     an admin verifies the transfer and approves. Approval grants the credits.
+//   - "card" / "fawry" — mock sandbox: no real processor, confirmed instantly
+//     on create (status "completed", credits granted immediately). For testing.
+//
+// amount/credits are snapshotted from the chosen package at purchase time so a
+// later price change never rewrites history. Credits are only ever added to the
+// broker on the pending -> completed transition (see admin.controller).
+model Transaction {
+  id              String    @id @default(uuid())
+  brokerId        String
+  broker          User      @relation(fields: [brokerId], references: [id], onDelete: Cascade)
+  packageId       String    // snapshot of the package id, e.g. "small" | "medium" | "large"
+  amount          Float     // EGP charged for the package
+  credits         Int       // listing credits to grant on completion
+  method          String    // "vodafone_cash" | "card" | "fawry"
+  status          String    @default("pending") // "pending" | "completed" | "rejected"
+  senderNumber    String?   // vodafone_cash — wallet number the broker transferred from
+  receiptUrl      String?   // optional uploaded transfer screenshot
+  rejectionReason String?   // filled when an admin rejects the request
+  reviewedById    String?   // admin who approved/rejected (null for instant sandbox)
+  reviewedAt      DateTime? // when it moved out of "pending"
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([brokerId, createdAt])
 }

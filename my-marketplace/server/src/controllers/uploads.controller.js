@@ -52,3 +52,19 @@ export function uploadLicense(req, res, next) {
     return next(err);
   }
 }
+
+// POST /api/uploads/receipt — expects field name "receipt" (multipart).
+// Broker-only: a Vodafone Cash transfer screenshot (image or PDF).
+export function uploadReceipt(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    return res.status(201).json({
+      success: true,
+      url: fileUrl(req, req.file.filename),
+    });
+  } catch (err) {
+    return next(err);
+  }
+}

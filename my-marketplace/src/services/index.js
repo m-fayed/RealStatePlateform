@@ -21,7 +21,12 @@ export const listingsService = {
 };
 
 export const creditsService = {
-  purchase: (pkg) => apiClient.post('/credits/purchase', { package: pkg }),
+  // Pricing + payment config (packages, methods, Vodafone wallet number).
+  getPackages: () => apiClient.get('/credits/packages'),
+  // payload: { package, method, sender_number?, receipt_url? }
+  purchase: (payload) => apiClient.post('/credits/purchase', payload),
+  // The signed-in broker's own purchase history.
+  myTransactions: () => apiClient.get('/credits/transactions'),
 };
 
 export const uploadsService = {
@@ -38,6 +43,14 @@ export const uploadsService = {
     const form = new FormData();
     form.append('license', file);
     return apiClient.post('/uploads/license', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  // file: File (Vodafone Cash transfer screenshot, image or PDF) — returns { url }
+  uploadReceipt: (file) => {
+    const form = new FormData();
+    form.append('receipt', file);
+    return apiClient.post('/uploads/receipt', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },
@@ -61,4 +74,9 @@ export const adminService = {
   approveRegistration: (id) => apiClient.post(`/admin/registrations/${id}/approve`),
   rejectRegistration: (id, reason) => apiClient.post(`/admin/registrations/${id}/reject`, { reason }),
   getStatistics: () => apiClient.get('/admin/statistics'),
+  // Credit-purchase requests. status: optional 'pending' | 'completed' | 'rejected'.
+  getTransactions: (status) =>
+    apiClient.get('/admin/transactions', { params: status ? { status } : {} }),
+  approveTransaction: (id) => apiClient.patch(`/admin/transactions/${id}/approve`),
+  rejectTransaction: (id, reason) => apiClient.patch(`/admin/transactions/${id}/reject`, { reason }),
 };

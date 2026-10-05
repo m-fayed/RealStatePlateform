@@ -106,7 +106,119 @@ export function LicenseUploadField({ value, onChange, error }) {
   );
 }
 
-// Multi-file drag-and-drop uploader for listing photos.
+// Optional single-file upload for a Vodafone Cash transfer receipt (image or
+// PDF). Mirrors LicenseUploadField but is optional and clearable. onChange(url)
+// fires with the stored URL (or '' when cleared).
+export function ReceiptUploadField({ value, onChange }) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const [fileName, setFileName] = useState('');
+
+  const pickFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file after an error
+    if (!file) return;
+
+    setUploadError('');
+    if (!ACCEPTED_LICENSE_TYPES.includes(file.type)) {
+      setUploadError('الملف غير مدعوم — المسموح: صور أو PDF فقط');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setUploadError(`حجم الملف كبير جداً (${formatBytes(file.size)}) — الحد الأقصى 5 ميجابايت`);
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const res = await uploadsService.uploadReceipt(file);
+      if (res.data.success) {
+        setFileName(file.name);
+        onChange(res.data.url);
+      }
+    } catch (err) {
+      setUploadError(err.response?.data?.message || 'فشل رفع الملف — حاول مرة أخرى');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const clear = () => {
+    setFileName('');
+    setUploadError('');
+    onChange('');
+  };
+
+  return (
+    <div>
+      <label className="label-base">
+        إيصال التحويل <span className="font-normal text-slate-400">(اختياري)</span>
+      </label>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPTED_LICENSE_TYPES.join(',')}
+        onChange={pickFile}
+        className="hidden"
+        data-testid="receipt-file-input"
+      />
+
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={uploading}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-xl border-2 border-dashed p-3 text-sm font-medium transition
+            ${uploadError ? 'border-red-300 bg-red-50 text-red-700'
+              : value ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
+              : 'border-slate-300 bg-slate-50 text-slate-600 hover:border-brand-400 hover:bg-brand-50 hover:text-brand-700'}
+            disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          {uploading ? (
+            <>
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              جاري رفع الإيصال...
+            </>
+          ) : value ? (
+            <>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              {fileName ? `تم الرفع: ${fileName}` : 'تم رفع الإيصال'}
+            </>
+          ) : (
+            <>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              ارفع صورة التحويل (اختياري)
+            </>
+          )}
+        </button>
+        {value && !uploading && (
+          <button
+            type="button"
+            onClick={clear}
+            className="rounded-xl p-2 text-slate-400 transition hover:bg-slate-100 hover:text-red-600"
+            title="إزالة الإيصال"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      <p className="form-hint">صورة واضحة لإشعار التحويل (JPG / PNG / WebP / GIF / PDF) — حتى 5 ميجابايت. تساعد الإدارة على التحقق أسرع.</p>
+
+      {uploadError && <p className="mt-1.5 text-sm text-red-600">{uploadError}</p>}
+    </div>
+  );
+}
 // Uploads happen eagerly per selection; uploaded URLs accumulate in the
 // parent's form state (onUrlsChange receives the full URL array).
 export function ImageDropzone({ urls, onUrlsChange }) {

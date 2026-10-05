@@ -3,6 +3,7 @@ import { uploadImage, uploadDoc, MAX_LISTING_IMAGES } from '../lib/uploads.js';
 import {
   uploadListingImages,
   uploadLicense,
+  uploadReceipt,
   uploadErrorHandler,
 } from '../controllers/uploads.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth.middleware.js';
@@ -25,6 +26,16 @@ router.post(
   uploadDoc.single('license'),
   uploadErrorHandler,
   uploadLicense
+);
+
+// Vodafone Cash transfer receipt — broker only (uploaded during checkout).
+router.post(
+  '/receipt',
+  requireAuth,
+  requireRole('broker'),
+  uploadDoc.single('receipt'),
+  uploadErrorHandler,
+  uploadReceipt
 );
 
 export default router;

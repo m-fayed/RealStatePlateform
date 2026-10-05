@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
+import { serializeTransaction } from '../lib/serializers.js';
 
 // Shape pending broker rows for the admin panel.
 function serializePendingBroker(user) {
@@ -93,14 +94,21 @@ export async function rejectRegistration(req, res, next) {
   }
 }
 
-// GET /api/admin/statistics — four counts in parallel.
+// GET /api/admin/statistics — counts for the dashboard, in parallel.
 export async function getStatistics(req, res, next) {
   try {
-    const [active_brokers, seekers, total_listings, pending_registrations] = await Promise.all([
+    const [
+      active_brokers,
+      seekers,
+      total_listings,
+      pending_registrations,
+      pending_transactions,
+    ] = await Promise.all([
       prisma.user.count({ where: { role: 'broker', status: 'active' } }),
       prisma.user.count({ where: { role: 'seeker', status: 'active' } }),
       prisma.listing.count({ where: { status: 'active' } }),
       prisma.user.count({ where: { role: 'broker', status: 'pending' } }),
+      prisma.transaction.count({ where: { status: 'pending' } }),
     ]);
 
     res.json({
@@ -109,7 +117,128 @@ export async function getStatistics(req, res, next) {
       seekers,
       total_listings,
       pending_registrations,
+      pending_transactions,
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Credit-purchase transactions
+// ---------------------------------------------------------------------------
+
+const TX_STATUSES = ['pending', 'completed', 'rejected'];
+
+// GET /api/admin/transactions[?status=pending] — payment requests, newest first.
+// Includes the broker so the reviewer can see who paid without a second lookup.
+export async function listTransactions(req, res, next) {
+  try {
+    const status = typeof req.query.status === 'string' ? req.query.status : undefined;
+    const where = status && TX_STATUSES.includes(status) ? { status } : {};
+
+    const rows = await prisma.transaction.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: { broker: { select: { id: true, name: true, phone: true } } },
+    });
+
+    res.json({ success: true, transactions: rows.map(serializeTransaction) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// PATCH /api/admin/transactions/:id/approve
+// Flips pending -> completed and grants the broker their credits. The write is
+// gated on status:'pending' inside a transaction, so two admins approving the
+// same request at once can never double-credit the broker.
+export async function approveTransaction(req, res, next) {
+  try {
+    const { id } = req.params;
+    const tx = await prisma.transaction.findUnique({ where: { id } });
+
+    if (!tx) {
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+    if (tx.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot approve a transaction that is "${tx.status}"`,
+      });
+    }
+
+    const updated = await prisma.$transaction(async (dbtx) => {
+      const gate = await dbtx.transaction.updateMany({
+        where: { id, status: 'pending' },
+        data: {
+          status: 'completed',
+          reviewedById: req.user.id,
+          reviewedAt: new Date(),
+          rejectionReason: null,
+        },
+      });
+      if (gate.count === 0) return null; // lost a race — already processed
+      await dbtx.user.update({
+        where: { id: tx.brokerId },
+        data: { listingCredits: { increment: tx.credits } },
+      });
+      return dbtx.transaction.findUnique({ where: { id } });
+    });
+
+    if (!updated) {
+      return res.status(409).json({ success: false, message: 'Transaction already processed' });
+    }
+
+    res.json({ success: true, transaction: serializeTransaction(updated) });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const rejectTxSchema = z.object({
+  reason: z.string().trim().max(500).optional(),
+});
+
+// PATCH /api/admin/transactions/:id/reject — body: { reason }. No credits granted.
+export async function rejectTransaction(req, res, next) {
+  try {
+    const { id } = req.params;
+    const parsed = rejectTxSchema.safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({
+        success: false,
+        message: parsed.error.issues.map((i) => i.message).join(', '),
+      });
+    }
+    const reason = parsed.data.reason || null;
+
+    const tx = await prisma.transaction.findUnique({ where: { id } });
+    if (!tx) {
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+    if (tx.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot reject a transaction that is "${tx.status}"`,
+      });
+    }
+
+    const gate = await prisma.transaction.updateMany({
+      where: { id, status: 'pending' },
+      data: {
+        status: 'rejected',
+        rejectionReason: reason,
+        reviewedById: req.user.id,
+        reviewedAt: new Date(),
+      },
+    });
+    if (gate.count === 0) {
+      return res.status(409).json({ success: false, message: 'Transaction already processed' });
+    }
+
+    const updated = await prisma.transaction.findUnique({ where: { id } });
+    res.json({ success: true, transaction: serializeTransaction(updated) });
   } catch (err) {
     next(err);
   }
