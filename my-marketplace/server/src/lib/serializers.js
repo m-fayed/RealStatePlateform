@@ -32,7 +32,9 @@ export function serializeListing(row) {
     images: parseImages(row.images),
     ad_license_no: row.adLicenseNo,
     status: row.status,
-    is_active: row.status === 'active',
+    moderation_status: row.moderationStatus,
+    moderation_reason: row.moderationReason,
+    is_active: row.status === 'active' && row.moderationStatus === 'approved',
     views_count: row.viewsCount,
     is_featured: row.isFeatured ?? false,
     feature_type: row.featureType ?? null,
@@ -94,6 +96,7 @@ export function serializeConversation(row, viewerId) {
         }
       : null,
     last_message: lastMessage ? serializeMessage(lastMessage) : null,
+    unread_count: row._count?.messages ?? 0,
   };
 }
 

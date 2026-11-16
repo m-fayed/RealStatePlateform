@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { creditsService } from '../services';
+import { downloadPrivateDocument } from '../services/documents';
 import { ReceiptUploadField } from '../components/UploadFields';
 import { formatDate } from '../utils/formatters';
 
@@ -51,7 +52,7 @@ function StatusBadge({ status }) {
 // ---------------------------------------------------------------------------
 // Checkout modal — pick a payment method for the chosen package.
 // ---------------------------------------------------------------------------
-function CheckoutModal({ pkg, onClose, onCompleted, onPending }) {
+function CheckoutModal({ pkg, mockPaymentsEnabled, onClose, onCompleted, onPending }) {
   const [method, setMethod] = useState('vodafone_cash');
   const [senderNumber, setSenderNumber] = useState('');
   const [receiptUrl, setReceiptUrl] = useState('');
@@ -121,7 +122,7 @@ function CheckoutModal({ pkg, onClose, onCompleted, onPending }) {
           {/* Method picker */}
           <p className="label-base">اختر طريقة الدفع</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {PAYMENT_METHODS.map((m) => {
+            {PAYMENT_METHODS.filter((m) => !m.instant || mockPaymentsEnabled).map((m) => {
               const active = method === m.id;
               return (
                 <button
@@ -215,12 +216,23 @@ function CheckoutModal({ pkg, onClose, onCompleted, onPending }) {
 // ---------------------------------------------------------------------------
 export default function BuyCredits() {
   const navigate = useNavigate();
-  const { isAuthenticated, user, updateUser } = useAuth();
+  const { isAuthenticated, user, refreshUser } = useAuth();
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [checkoutPkg, setCheckoutPkg] = useState(null);
   const [transactions, setTransactions] = useState([]);
-  const [loadingTx, setLoadingTx] = useState(false);
+  const [loadingTx, setLoadingTx] = useState(true);
+  const [mockPaymentsEnabled, setMockPaymentsEnabled] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    creditsService.getPackages().then((res) => {
+      if (!cancelled) setMockPaymentsEnabled(res.data.mock_payments_enabled === true);
+    }).catch(() => {
+      // Fail closed: mock methods stay hidden when configuration is unavailable.
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   const isBroker = isAuthenticated && user?.role === 'broker';
   const credits = isBroker ? (user.listingCredits ?? 0) : 0;
@@ -228,7 +240,6 @@ export default function BuyCredits() {
   const loadTransactions = useCallback(async () => {
     if (!isBroker) return;
     try {
-      setLoadingTx(true);
       const res = await creditsService.myTransactions();
       if (res.data.success) setTransactions(res.data.transactions);
     } catch {
@@ -239,8 +250,13 @@ export default function BuyCredits() {
   }, [isBroker]);
 
   useEffect(() => {
-    loadTransactions();
-  }, [loadTransactions]);
+    let cancelled = false;
+    creditsService.myTransactions().then((response) => {
+      if (!cancelled) setTransactions(response.data.transactions);
+    }).catch(() => { /* Purchase controls remain usable if history is unavailable. */ })
+      .finally(() => { if (!cancelled) setLoadingTx(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const startPurchase = (pkg) => {
     setError('');
@@ -257,7 +273,7 @@ export default function BuyCredits() {
   };
 
   const handleCompleted = (data) => {
-    if (data.user) updateUser(data.user);
+    void refreshUser();
     setSuccess(
       `تمت إضافة ${data.credits_added} رصيد إعلانات بنجاح. رصيدك الحالي: ${data.user?.listingCredits ?? ''}.`
     );
@@ -278,7 +294,8 @@ export default function BuyCredits() {
         <span className="badge-brand">شراء رصيد الإعلانات</span>
         <h1 className="heading-page mt-4">اشحن رصيدك وانشر إعلاناتك</h1>
         <p className="mt-3 text-meta">
-          كل إعلان يُكلّف رصيداً واحداً. اختر الحزمة الأنسب، وادفع عبر فودافون كاش أو جرّب الدفع التجريبي.
+          كل إعلان يُكلّف رصيداً واحداً. اختر الحزمة الأنسب، وادفع عبر فودافون كاش.
+          {mockPaymentsEnabled && ' يمكنك أيضاً تجربة الدفع التجريبي.'}
         </p>
       </div>
 
@@ -424,6 +441,7 @@ export default function BuyCredits() {
                   {tx.receipt_url && (
                     <a
                       href={tx.receipt_url}
+                      onClick={(event) => { event.preventDefault(); downloadPrivateDocument(tx.receipt_url); }}
                       target="_blank"
                       rel="noreferrer"
                       className="text-sm font-semibold text-brand-700 hover:underline"
@@ -445,7 +463,8 @@ export default function BuyCredits() {
       {/* Footnotes */}
       <div className="mx-auto mt-10 max-w-2xl text-center">
         <p className="text-xs text-slate-500">
-          الدفع عبر فودافون كاش يُراجَع يدوياً من الإدارة. خيارات البطاقة/فوري تجريبية حالياً وتضيف الرصيد فوراً.
+          الدفع عبر فودافون كاش يُراجَع يدوياً من الإدارة.
+          {mockPaymentsEnabled && ' خيارات البطاقة/فوري تجريبية حالياً وتضيف الرصيد فوراً.'}
         </p>
         {!isAuthenticated && (
           <p className="mt-2 text-sm text-slate-600">
@@ -460,6 +479,7 @@ export default function BuyCredits() {
       {checkoutPkg && (
         <CheckoutModal
           pkg={checkoutPkg}
+          mockPaymentsEnabled={mockPaymentsEnabled}
           onClose={() => setCheckoutPkg(null)}
           onCompleted={handleCompleted}
           onPending={handlePending}

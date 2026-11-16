@@ -12,6 +12,8 @@ export const authService = {
 };
 
 export const listingsService = {
+  getMine: () => apiClient.get('/listings/mine'),
+  setStatus: (id, status) => apiClient.patch(`/listings/${id}/status`, { status }),
   getAll: (filters) => apiClient.get('/listings', { params: filters }),
   getById: (id) => apiClient.get(`/listings/${id}`),
   create: (data) => apiClient.post('/listings', data),
@@ -60,7 +62,7 @@ export const chatService = {
   listConversations: () => apiClient.get('/conversations'),
   createOrFetch: (listingId) => apiClient.post('/conversations', { listing_id: listingId }),
   getConversation: (id) => apiClient.get(`/conversations/${id}`),
-  listMessages: (id) => apiClient.get(`/conversations/${id}/messages`),
+  listMessages: (id, cursor) => apiClient.get(`/conversations/${id}/messages`, { params: { limit: 50, ...(cursor ? { cursor } : {}) } }),
   sendMessage: (id, body) => apiClient.post(`/conversations/${id}/messages`, { body }),
 };
 
@@ -70,6 +72,10 @@ export const brokersService = {
 };
 
 export const adminService = {
+  getBrokers: () => apiClient.get('/admin/brokers'),
+  setSuspension: (id, suspended) => apiClient.patch(`/admin/brokers/${id}/suspension`, { suspended }),
+  getListings: () => apiClient.get('/admin/listings'),
+  moderateListing: (id, action, reason) => apiClient.patch(`/admin/listings/${id}/moderation`, { action, reason }),
   getRegistrations: () => apiClient.get('/admin/registrations'),
   approveRegistration: (id) => apiClient.post(`/admin/registrations/${id}/approve`),
   rejectRegistration: (id, reason) => apiClient.post(`/admin/registrations/${id}/reject`, { reason }),

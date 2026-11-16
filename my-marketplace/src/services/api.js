@@ -1,8 +1,7 @@
 import axios from 'axios';
-import { API_ENDPOINTS } from '../constants/api';
 
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5002/api',
   headers: {
     'Content-Type': 'application/json'
   }
@@ -21,13 +20,19 @@ apiClient.interceptors.request.use((config) => {
 
 // Handle response errors
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    if (typeof response.data?.credits_remaining === 'number' || typeof response.data?.credits_added === 'number') {
+      window.dispatchEvent(new Event('auth:refresh'));
+    }
+    return response;
+  },
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && error.config?.url !== '/auth/login') {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      window.location.href = '/auth';
+      window.dispatchEvent(new Event('auth:expired'));
     }
+    if (error.response?.status === 402) window.dispatchEvent(new Event('auth:refresh'));
     return Promise.reject(error);
   }
 );

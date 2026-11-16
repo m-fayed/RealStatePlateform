@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { brokersService } from '../services';
+import { downloadPrivateDocument } from '../services/documents';
+import { useAuth } from '../hooks/useAuth';
 import ListingCard from '../components/ListingCard';
 
 function ProfileSkeleton() {
@@ -19,27 +21,23 @@ function ProfileSkeleton() {
 export default function BrokerProfile() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [broker, setBroker] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchBrokerProfile();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const fetchBrokerProfile = async () => {
-    try {
+    let cancelled = false;
+    (async () => {
       setLoading(true);
-      const response = await brokersService.getProfile(id);
-      if (response.data.success) {
-        setBroker(response.data.broker);
-      }
-    } catch (error) {
-      console.error('Error fetching broker profile:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setBroker(null);
+      try {
+        const response = await brokersService.getProfile(id);
+        if (!cancelled && response.data.success) setBroker(response.data.broker);
+      } catch (error) { if (!cancelled) console.error('Error fetching broker profile:', error); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
 
   if (loading) return <ProfileSkeleton />;
 
@@ -116,9 +114,9 @@ export default function BrokerProfile() {
               <div className="mt-4 inline-flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-4 py-2 text-sm ring-1 ring-slate-200">
                 <span className="text-slate-500">رقم الرخصة:</span>
                 <span className="font-mono font-semibold text-slate-900">{broker.ad_license_no}</span>
-                {broker.license_image_url && (
+                {broker.license_image_url && (user?.id === broker.id || user?.role === 'admin') && (
                   <button
-                    onClick={() => window.open(broker.license_image_url, '_blank')}
+                    onClick={() => downloadPrivateDocument(broker.license_image_url)}
                     className="mr-2 text-xs font-semibold text-brand-700 hover:underline"
                   >
                     عرض الرخصة

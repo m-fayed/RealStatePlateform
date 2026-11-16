@@ -16,7 +16,7 @@ function formatBytes(bytes) {
 // Single-file upload button for the broker license (image or PDF).
 // Uploads immediately on selection; onUpload(url) fires once with the
 // stored file's URL so the parent form can submit it with registration.
-export function LicenseUploadField({ value, onChange, error }) {
+export function LicenseUploadField({ value, onChange, onTokenChange, error }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
@@ -43,6 +43,7 @@ export function LicenseUploadField({ value, onChange, error }) {
       if (res.data.success) {
         setFileName(file.name);
         onChange(res.data.url);
+        onTokenChange(res.data.upload_token);
       }
     } catch (err) {
       setUploadError(err.response?.data?.message || 'فشل رفع الملف — حاول مرة أخرى');

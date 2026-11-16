@@ -14,7 +14,7 @@ import { fileUrl } from '../lib/uploads.js';
 // err passed to the global error handler. Normalize them into clean 400s
 // with the same { success:false } shape the rest of the API uses.
 export function uploadErrorHandler(err, _req, res, _next) {
-  if (err && (err.code === 'LIMIT_FILE_SIZE' || err.message?.startsWith('File type not allowed'))) {
+  if (err && (err.code?.startsWith('LIMIT_') || err.status === 400)) {
     return res.status(400).json({ success: false, message: err.message });
   }
   if (err && err.code === 'LIMIT_FILE_COUNT') {
@@ -46,7 +46,8 @@ export function uploadLicense(req, res, next) {
     }
     return res.status(201).json({
       success: true,
-      url: fileUrl(req, req.file.filename),
+      url: fileUrl(req, req.file.filename, true),
+      upload_token: req.file.uploadToken,
     });
   } catch (err) {
     return next(err);
@@ -62,7 +63,7 @@ export function uploadReceipt(req, res, next) {
     }
     return res.status(201).json({
       success: true,
-      url: fileUrl(req, req.file.filename),
+      url: fileUrl(req, req.file.filename, true),
     });
   } catch (err) {
     return next(err);

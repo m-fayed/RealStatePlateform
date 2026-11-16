@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
+    "lint": "eslint .",
+    "test": "node --test src/api.test.js src/security.test.js src/workflows.test.js src/controllers/credits.controller.test.js src/controllers/listings.concurrency.test.js",
     "seed": "node prisma/seed.js"
   },
+  "engines": { "node": ">=22.14.0" },
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",

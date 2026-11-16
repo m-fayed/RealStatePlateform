@@ -1,10 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { chatService } from '../services';
 import { formatCurrency } from '../utils/formatters';
 
 const POLL_INTERVAL_MS = 3000;
+
+function mergeMessages(previous, incoming) {
+  const byId = new Map(previous.map((message) => [message.id, message]));
+  for (const message of incoming) byId.set(message.id, message);
+  return [...byId.values()].sort((a, b) => {
+    const time = new Date(a.created_at) - new Date(b.created_at);
+    return time || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  });
+}
 
 function MessageBubble({ message, isMine }) {
   return (
@@ -22,13 +31,14 @@ function MessageBubble({ message, isMine }) {
             hour: '2-digit',
             minute: '2-digit',
           })}
+          {isMine && message.read_at && ' • تمت القراءة'}
         </p>
       </div>
     </div>
   );
 }
 
-export default function ChatPage() {
+function ChatConversation() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -40,6 +50,10 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
   const lastMessageIdRef = useRef(null);
+  const messagesRef = useRef([]);
+  const [nextCursor, setNextCursor] = useState(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const restoreScrollRef = useRef(null);
 
   // Initial load — conversation metadata + messages.
   useEffect(() => {
@@ -54,7 +68,10 @@ export default function ChatPage() {
         ]);
         if (cancelled) return;
         if (convRes.data.success) setConversation(convRes.data.conversation);
-        if (msgRes.data.success) setMessages(msgRes.data.messages);
+        if (msgRes.data.success) {
+          setMessages([...msgRes.data.messages].reverse());
+          setNextCursor(msgRes.data.next_cursor);
+        }
       } catch (err) {
         if (cancelled) return;
         const status = err.response?.status;
@@ -75,20 +92,41 @@ export default function ChatPage() {
   // Polling — refetch messages every few seconds while the page is open.
   useEffect(() => {
     if (!conversation) return undefined;
+    let cancelled = false;
+    let polling = false;
     const tick = async () => {
+      if (polling || document.visibilityState === 'hidden') return;
+      polling = true;
       try {
-        const res = await chatService.listMessages(id);
-        if (res.data.success) setMessages(res.data.messages);
+        const known = new Set(messagesRef.current.map((message) => message.id));
+        let cursor;
+        const incoming = [];
+        // Catch up across multiple pages after a long pause, preserving history.
+        do {
+          const res = await chatService.listMessages(id, cursor);
+          if (cancelled) return;
+          incoming.push(...res.data.messages);
+          if (res.data.messages.some((message) => known.has(message.id))) break;
+          cursor = res.data.next_cursor;
+        } while (cursor);
+        if (!cancelled) setMessages((previous) => mergeMessages(previous, incoming));
       } catch {
         // Swallow transient errors; the next tick will retry.
-      }
+      } finally { polling = false; }
     };
     const interval = setInterval(tick, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [id, conversation]);
 
   // Auto-scroll to bottom when a new message arrives.
-  useEffect(() => {
+  useLayoutEffect(() => {
+    messagesRef.current = messages;
+    if (restoreScrollRef.current && scrollRef.current) {
+      const { height, top } = restoreScrollRef.current;
+      scrollRef.current.scrollTop = top + scrollRef.current.scrollHeight - height;
+      restoreScrollRef.current = null;
+      return;
+    }
     const last = messages[messages.length - 1];
     if (!last) return;
     if (lastMessageIdRef.current === last.id) return;
@@ -98,6 +136,18 @@ export default function ChatPage() {
     }
   }, [messages]);
 
+  const loadOlder = async () => {
+    if (!nextCursor || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const res = await chatService.listMessages(id, nextCursor);
+      if (scrollRef.current) restoreScrollRef.current = { height: scrollRef.current.scrollHeight, top: scrollRef.current.scrollTop };
+      setMessages((previous) => mergeMessages(previous, res.data.messages));
+      setNextCursor(res.data.next_cursor);
+    } catch { alert('تعذّر تحميل الرسائل السابقة'); }
+    finally { setLoadingOlder(false); }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     const body = input.trim();
@@ -106,7 +156,7 @@ export default function ChatPage() {
       setSending(true);
       const res = await chatService.sendMessage(id, body);
       if (res.data.success) {
-        setMessages((prev) => [...prev, res.data.message]);
+        setMessages((prev) => mergeMessages(prev, [res.data.message]));
         setInput('');
       }
     } catch (err) {
@@ -194,6 +244,7 @@ export default function ChatPage() {
           ref={scrollRef}
           className="mt-4 h-[60vh] overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50 p-4"
         >
+          {nextCursor && <button onClick={loadOlder} disabled={loadingOlder} className="btn-secondary mb-4 w-full">{loadingOlder ? 'جاري التحميل...' : 'تحميل الرسائل السابقة'}</button>}
           {messages.length === 0 ? (
             <div className="flex h-full items-center justify-center text-center">
               <div>
@@ -237,4 +288,9 @@ export default function ChatPage() {
       </div>
     </div>
   );
+}
+
+export default function ChatPage() {
+  const { id } = useParams();
+  return <ChatConversation key={id} />;
 }

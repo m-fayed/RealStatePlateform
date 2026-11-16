@@ -62,24 +62,19 @@ export default function ListingDetail() {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
 
   useEffect(() => {
-    fetchListing();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
-  const fetchListing = async () => {
-    try {
+    let cancelled = false;
+    (async () => {
       setLoading(true);
-      const response = await listingsService.getById(id);
-      if (response.data.success) {
-        setListing(response.data.listing);
-        setCurrentImageIndex(0);
-      }
-    } catch (error) {
-      console.error('Error fetching listing:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      setListing(null);
+      setCurrentImageIndex(0);
+      try {
+        const response = await listingsService.getById(id);
+        if (!cancelled && response.data.success) setListing(response.data.listing);
+      } catch (error) { if (!cancelled) console.error('Error fetching listing:', error); }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
 
   const handleContact = () => {
     if (!isAuthenticated) {

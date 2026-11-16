@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { adminService } from '../services';
+import { downloadPrivateDocument } from '../services/documents';
 import { formatDate } from '../utils/formatters';
+import ModerationPanel from '../components/ModerationPanel';
 
 const METHOD_LABELS = {
   vodafone_cash: 'فودافون كاش',
@@ -33,77 +35,43 @@ export default function AdminPanel() {
   const [tab, setTab] = useState('pending');
   const [pendingRegistrations, setPendingRegistrations] = useState([]);
   const [statistics, setStatistics] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [rejectReason, setRejectReason] = useState({});
 
   // Credit-purchase requests.
   const [transactions, setTransactions] = useState([]);
-  const [loadingTx, setLoadingTx] = useState(false);
+  const [loadingTx, setLoadingTx] = useState(true);
   const [txFilter, setTxFilter] = useState('pending'); // 'pending' | 'all'
   const [txRejectReason, setTxRejectReason] = useState({});
   const [txBusy, setTxBusy] = useState(null);
 
-  // Fetch transactions once on mount so the tab badge is populated even before
-  // the tab is opened.
+  const [loadError, setLoadError] = useState('');
   useEffect(() => {
-    fetchTransactions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (tab === 'pending') fetchPendingRegistrations();
-    else if (tab === 'transactions') fetchTransactions();
-    else fetchStatistics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    adminService.getTransactions().then((response) => {
+      if (!cancelled) setTransactions(response.data.transactions);
+    }).catch(() => { if (!cancelled) setLoadError('تعذّر تحميل طلبات الشحن'); })
+      .finally(() => { if (!cancelled) setLoadingTx(false); });
+    return () => { cancelled = true; };
   }, [tab]);
-
-  const fetchPendingRegistrations = async () => {
-    try {
-      setLoading(true);
-      const response = await adminService.getRegistrations();
-      if (response.data.success) {
-        setPendingRegistrations(response.data.registrations);
-      }
-    } catch (error) {
-      console.error('Error fetching registrations:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchStatistics = async () => {
-    try {
-      setLoading(true);
-      const response = await adminService.getStatistics();
-      if (response.data.success) {
-        setStatistics(response.data);
-      }
-    } catch (error) {
-      console.error('Error fetching statistics:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchTransactions = async () => {
-    try {
-      setLoadingTx(true);
-      const response = await adminService.getTransactions();
-      if (response.data.success) {
-        setTransactions(response.data.transactions);
-      }
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
-    } finally {
-      setLoadingTx(false);
-    }
-  };
+  useEffect(() => {
+    if (!['pending', 'statistics'].includes(tab)) return;
+    let cancelled = false;
+    const request = tab === 'pending' ? adminService.getRegistrations() : adminService.getStatistics();
+    request.then((response) => {
+      if (cancelled) return;
+      if (tab === 'pending') setPendingRegistrations(response.data.registrations);
+      else setStatistics(response.data);
+    }).catch(() => { if (!cancelled) setLoadError('تعذّر تحميل بيانات الإدارة'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab]);
 
   const handleApprove = async (id) => {
     try {
       await adminService.approveRegistration(id);
       setPendingRegistrations(pendingRegistrations.filter((r) => r.id !== id));
-    } catch (error) {
+    } catch {
       alert('فشلت الموافقة على التسجيل');
     }
   };
@@ -118,7 +86,7 @@ export default function AdminPanel() {
         delete next[id];
         return next;
       });
-    } catch (error) {
+    } catch {
       alert('فشل رفض التسجيل');
     }
   };
@@ -162,6 +130,7 @@ export default function AdminPanel() {
 
   return (
     <div className="page-container page-section">
+      {loadError && <p role="alert" className="text-red-700">{loadError}</p>}
       {/* Header */}
       <div className="flex items-center gap-3">
         <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-red-700">
@@ -176,6 +145,7 @@ export default function AdminPanel() {
       </div>
 
       {/* Tabs */}
+      <button onClick={() => setTab('moderation')} className={`btn-secondary mt-6 ${tab === 'moderation' ? 'ring-2 ring-brand-600' : ''}`}>المسوقون ومراجعة الإعلانات</button>
       <div className="segmented mt-6 inline-grid w-full grid-cols-3 sm:w-auto sm:grid-flow-col sm:grid-cols-none">
         <button
           onClick={() => setTab('pending')}
@@ -209,7 +179,7 @@ export default function AdminPanel() {
 
       {/* Content */}
       <div className="mt-8">
-        {tab === 'pending' ? (
+        {tab === 'moderation' ? <ModerationPanel /> : tab === 'pending' ? (
           loading ? (
             <div className="space-y-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -257,7 +227,7 @@ export default function AdminPanel() {
                             <p className="eyebrow">صورة الرخصة</p>
                             {registration.license_image_url ? (
                               <button
-                                onClick={() => window.open(registration.license_image_url, '_blank')}
+                                onClick={() => downloadPrivateDocument(registration.license_image_url)}
                                 className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline"
                               >
                                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -401,6 +371,7 @@ export default function AdminPanel() {
                             {tx.receipt_url && (
                               <a
                                 href={tx.receipt_url}
+                                onClick={(event) => { event.preventDefault(); downloadPrivateDocument(tx.receipt_url); }}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline"

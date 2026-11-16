@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { uploadImage, uploadDoc, MAX_LISTING_IMAGES } from '../lib/uploads.js';
+import { uploadImage, uploadDoc, MAX_LISTING_IMAGES, storeUploads, readDocument } from '../lib/uploads.js';
+import { uploadLimiter } from '../lib/security.js';
 import {
   uploadListingImages,
   uploadLicense,
@@ -9,6 +10,8 @@ import {
 import { requireAuth, requireRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
+router.get('/documents/:filename', requireAuth, readDocument);
+router.use(uploadLimiter);
 
 // Broker listing photos — requires an active broker account.
 router.post(
@@ -16,6 +19,7 @@ router.post(
   requireAuth,
   requireRole('broker'),
   uploadImage.array('images', MAX_LISTING_IMAGES),
+  storeUploads('images'),
   uploadErrorHandler,
   uploadListingImages
 );
@@ -24,6 +28,7 @@ router.post(
 router.post(
   '/license',
   uploadDoc.single('license'),
+  storeUploads('license'),
   uploadErrorHandler,
   uploadLicense
 );
@@ -34,6 +39,7 @@ router.post(
   requireAuth,
   requireRole('broker'),
   uploadDoc.single('receipt'),
+  storeUploads('receipt'),
   uploadErrorHandler,
   uploadReceipt
 );

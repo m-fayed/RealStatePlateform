@@ -56,24 +56,18 @@ export default function Home() {
   });
 
   useEffect(() => {
-    fetchListings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters]);
-
-  const fetchListings = async () => {
-    try {
+    let cancelled = false;
+    (async () => {
       setLoading(true);
-      const response = await listingsService.getAll(filters);
-      if (response.data.success) {
-        setListings(response.data.listings);
-      }
-    } catch (error) {
-      console.error('Error fetching listings:', error);
-      setListings([]);
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const response = await listingsService.getAll(filters);
+        if (!cancelled && response.data.success) setListings(response.data.listings);
+      } catch (error) {
+        if (!cancelled) { console.error('Error fetching listings:', error); setListings([]); }
+      } finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [filters]);
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();

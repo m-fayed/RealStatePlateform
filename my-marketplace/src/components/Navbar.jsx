@@ -6,7 +6,12 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
   const { isAuthenticated, user, logout } = useAuth();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileMenuLocationKey, setMobileMenuLocationKey] = useState(null);
+  const mobileOpen = mobileMenuLocationKey === location.key;
+  const setMobileOpen = (open) => setMobileMenuLocationKey((current) => {
+    const next = typeof open === 'function' ? open(current === location.key) : open;
+    return next ? location.key : null;
+  });
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -14,10 +19,6 @@ export default function Navbar() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
-
-  useEffect(() => {
-    setMobileOpen(false);
-  }, [location.pathname]);
 
   const handleLogout = () => {
     logout();

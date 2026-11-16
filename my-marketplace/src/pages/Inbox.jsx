@@ -36,9 +36,8 @@ export default function Inbox() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const refresh = async () => {
       try {
-        setLoading(true);
         setError('');
         const res = await chatService.listConversations();
         if (cancelled) return;
@@ -48,9 +47,14 @@ export default function Inbox() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    void refresh();
+    const interval = setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
     return () => {
       cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('focus', refresh);
     };
   }, []);
 
@@ -104,6 +108,7 @@ export default function Inbox() {
                       <div className="flex items-baseline justify-between gap-3">
                         <p className="truncate font-semibold text-slate-900">
                           {c.counterparty?.name || 'مستخدم'}
+                          {c.unread_count > 0 && <span className="badge-brand mr-2" aria-label={`${c.unread_count} رسائل غير مقروءة`}>{c.unread_count}</span>}
                         </p>
                         <span className="shrink-0 text-xs text-slate-400">
                           {timeAgo(c.updated_at)}

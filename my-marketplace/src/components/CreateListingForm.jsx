@@ -25,11 +25,11 @@ function FormSection({ label, children }) {
   );
 }
 
-export default function CreateListingForm({ onCancel, onSuccess }) {
+export default function CreateListingForm({ listing, onCancel, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [imageUrls, setImageUrls] = useState([]);
-  const [formData, setFormData] = useState({
+  const [imageUrls, setImageUrls] = useState(listing?.images || []);
+  const [formData, setFormData] = useState(() => ({
     title: '',
     description: '',
     city: '',
@@ -39,8 +39,9 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
     price: '',
     size_sqm: '',
     rooms: '',
-    floor: ''
-  });
+    floor: '',
+    ...Object.fromEntries(['title', 'description', 'city', 'area', 'property_type', 'offer_type', 'price', 'size_sqm', 'rooms', 'floor'].filter((key) => listing?.[key] != null).map((key) => [key, listing[key]])),
+  }));
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -54,19 +55,19 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
     try {
       const data = {
         ...formData,
-        price: parseInt(formData.price),
-        size_sqm: formData.size_sqm ? parseInt(formData.size_sqm) : null,
-        rooms: formData.rooms ? parseInt(formData.rooms) : null,
-        floor: formData.floor ? parseInt(formData.floor) : null,
+        price: Number(formData.price),
+        size_sqm: formData.size_sqm !== '' ? Number(formData.size_sqm) : null,
+        rooms: formData.rooms !== '' ? Number(formData.rooms) : null,
+        floor: formData.floor !== '' ? Number(formData.floor) : null,
         images: imageUrls
       };
 
-      const response = await listingsService.create(data);
+      const response = listing ? await listingsService.update(listing.id, data) : await listingsService.create(data);
       if (response.data.success) {
-        onSuccess();
+        onSuccess(response.data);
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'فشل في إضافة الإعلان');
+      setError(err.response?.data?.message || 'تعذّر حفظ الإعلان');
     } finally {
       setLoading(false);
     }
@@ -76,8 +77,8 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
     <div className="card overflow-hidden">
       <div className="flex items-center justify-between gap-4 border-b border-slate-200/70 bg-slate-50/60 px-6 py-5 sm:px-8">
         <div>
-          <h2 className="heading-section">إضافة إعلان جديد</h2>
-          <p className="mt-1 text-meta">املأ التفاصيل التالية لنشر إعلانك على المنصة.</p>
+          <h2 className="heading-section">{listing ? 'تعديل الإعلان' : 'إضافة إعلان جديد'}</h2>
+          <p className="mt-1 text-meta">تُراجع الإعلانات الجديدة والتعديلات قبل ظهورها للجمهور. لا تتطلب التعديلات رصيداً إضافياً.</p>
         </div>
         <button onClick={onCancel} className="btn-ghost btn-sm" aria-label="إغلاق">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -256,7 +257,7 @@ export default function CreateListingForm({ onCancel, onSuccess }) {
 
         <div className="flex flex-col gap-3 border-t border-slate-200/70 pt-6 sm:flex-row">
           <button type="submit" disabled={loading} className="btn-brand btn-lg flex-1">
-            {loading ? 'جاري النشر...' : 'نشر الإعلان'}
+            {loading ? 'جاري الحفظ...' : listing ? 'حفظ التعديلات' : 'إرسال للمراجعة'}
           </button>
           <button type="button" onClick={onCancel} className="btn-secondary btn-lg flex-1">
             إلغاء

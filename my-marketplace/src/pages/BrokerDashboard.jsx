@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { listingsService } from '../services';
@@ -22,11 +22,14 @@ function StatCard({ icon, label, value, accent }) {
 
 export default function BrokerDashboard() {
   const navigate = useNavigate();
-  const { user, updateUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [listings, setListings] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [boostingListing, setBoostingListing] = useState(null);
+  const [editingListing, setEditingListing] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(null);
 
   const credits = user?.listingCredits ?? 0;
 
@@ -34,48 +37,57 @@ export default function BrokerDashboard() {
     if (response?.listing) {
       setListings((prev) => prev.map((l) => (l.id === response.listing.id ? response.listing : l)));
     }
-    if (user && typeof response?.credits_remaining === 'number') {
-      updateUser({ ...user, listingCredits: response.credits_remaining });
-    }
+    void refreshUser();
     setBoostingListing(null);
   };
 
-  useEffect(() => {
-    fetchMyListings();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const fetchMyListings = async () => {
+  const fetchMyListings = useCallback(async () => {
     try {
-      setLoading(true);
-      const response = await listingsService.getAll({ broker_id: user.id });
+      const response = await listingsService.getMine();
       if (response.data.success) {
         setListings(response.data.listings);
       }
     } catch (error) {
-      console.error('Error fetching listings:', error);
+      setError(error.response?.data?.message || 'تعذّر تحميل الإعلانات');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listingsService.getMine().then((response) => {
+      if (!cancelled) setListings(response.data.listings);
+    }).catch(() => { if (!cancelled) setError('تعذّر تحميل الإعلانات'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const handleDelete = async (id) => {
     if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذا الإعلان؟')) return;
     try {
       await listingsService.delete(id);
       setListings(listings.filter((l) => l.id !== id));
-    } catch (error) {
+    } catch {
       alert('فشل حذف الإعلان');
     }
   };
 
   const handleListingCreated = () => {
     setShowCreateForm(false);
+    setEditingListing(null);
     fetchMyListings();
-    // Reflect the credit deduction client-side without an extra request.
-    if (user) {
-      updateUser({ ...user, listingCredits: Math.max(0, credits - 1) });
-    }
+    void refreshUser();
+  };
+
+  const changeStatus = async (listing, status) => {
+    setBusy(listing.id);
+    setError('');
+    try {
+      await listingsService.setStatus(listing.id, status);
+      await fetchMyListings();
+    } catch (error) { setError(error.response?.data?.message || 'تعذّر تغيير الحالة'); }
+    finally { setBusy(null); }
   };
 
   const totalViews = listings.reduce((sum, l) => sum + (l.views_count || 0), 0);
@@ -83,6 +95,7 @@ export default function BrokerDashboard() {
 
   return (
     <div className="page-container page-section">
+      {error && <p role="alert" className="mb-4 text-red-700">{error}</p>}
       {/* Header */}
       <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
         <div>
@@ -92,7 +105,7 @@ export default function BrokerDashboard() {
           </p>
         </div>
         {!showCreateForm && (
-          <button onClick={() => setShowCreateForm(true)} className="btn-brand w-full sm:w-auto">
+          <button onClick={() => { setEditingListing(null); setShowCreateForm(true); }} className="btn-brand w-full sm:w-auto">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
@@ -164,10 +177,12 @@ export default function BrokerDashboard() {
         />
       </div>
 
-      {showCreateForm && (
+      {(showCreateForm || editingListing) && (
         <div className="mt-8">
           <CreateListingForm
-            onCancel={() => setShowCreateForm(false)}
+            key={editingListing?.id || 'new'}
+            listing={editingListing}
+            onCancel={() => { setShowCreateForm(false); setEditingListing(null); }}
             onSuccess={handleListingCreated}
           />
         </div>
@@ -192,9 +207,16 @@ export default function BrokerDashboard() {
               <div key={listing.id} className="group relative">
                 <ListingCard
                   listing={listing}
-                  onClick={() => navigate(`/listings/${listing.id}`)}
+                  onClick={() => listing.moderation_status === 'approved' ? navigate(`/listings/${listing.id}`) : setEditingListing(listing)}
                 />
-                <div className="absolute left-3 top-3 flex gap-2 opacity-0 transition group-hover:opacity-100">
+                <div className="flex flex-wrap items-center gap-2 rounded-b-xl bg-white p-3">
+                  <span className="text-xs">{({ pending: 'قيد المراجعة', approved: 'مقبول', rejected: 'مرفوض', hidden: 'مخفي' })[listing.moderation_status]}</span>
+                  {listing.moderation_reason && <p className="w-full text-xs text-red-700">{listing.moderation_reason}</p>}
+                  <button className="btn-secondary btn-sm" onClick={() => { setShowCreateForm(false); setEditingListing(listing); }}>تعديل</button>
+                  <select aria-label="حالة الإعلان" value={listing.status} disabled={busy === listing.id} onChange={(event) => changeStatus(listing, event.target.value)} className="rounded border p-2 text-sm">
+                    <option value="active">متاح</option>
+                    {listing.offer_type === 'sale' ? <option value="sold">تم البيع</option> : <option value="rented">تم التأجير</option>}
+                  </select>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -226,7 +248,7 @@ export default function BrokerDashboard() {
             <p className="mt-1 text-meta">
               ابدأ بإضافة أول إعلان عقاري ليصل إلى آلاف الباحثين.
             </p>
-            <button onClick={() => setShowCreateForm(true)} className="btn-brand mt-6">
+            <button onClick={() => { setEditingListing(null); setShowCreateForm(true); }} className="btn-brand mt-6">
               إضافة إعلان الآن
             </button>
           </div>

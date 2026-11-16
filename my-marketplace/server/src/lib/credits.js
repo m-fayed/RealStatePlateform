@@ -2,6 +2,33 @@
 // Prices are in EGP. These are the single source of truth the purchase
 // endpoint validates against — the frontend mirrors them for display only.
 
+import process from 'node:process';
+
+export function mockPaymentsEnabled() {
+  return process.env.NODE_ENV === 'development' && process.env.ENABLE_MOCK_PAYMENTS === 'true';
+}
+
+export class InsufficientCreditsError extends Error {
+  constructor() {
+    super('Insufficient credits. Please purchase a credit package.');
+    this.code = 'INSUFFICIENT_CREDITS';
+  }
+}
+
+// Call only inside the transaction that performs the paid operation.
+export async function spendCredits(tx, userId, cost) {
+  const result = await tx.user.updateMany({
+    where: { id: userId, listingCredits: { gte: cost } },
+    data: { listingCredits: { decrement: cost } },
+  });
+  if (result.count === 0) throw new InsufficientCreditsError();
+  const user = await tx.user.findUniqueOrThrow({
+    where: { id: userId },
+    select: { listingCredits: true },
+  });
+  return user.listingCredits;
+}
+
 export const CREDIT_PACKAGES = {
   small: { credits: 5, price: 50 },
   medium: { credits: 10, price: 90 },

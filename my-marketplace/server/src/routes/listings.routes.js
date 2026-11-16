@@ -6,15 +6,19 @@ import {
   updateListing,
   deleteListing,
   boostListing,
+  listMyListings,
+  changeListingStatus,
 } from '../controllers/listings.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth.middleware.js';
 
 const router = Router();
 
 router.get('/', listListings);
+router.get('/mine', requireAuth, requireRole('broker'), listMyListings);
 router.get('/:id', getListing);
 router.post('/', requireAuth, requireRole('broker'), createListing);
 router.put('/:id', requireAuth, requireRole('broker'), updateListing);
+router.patch('/:id/status', requireAuth, requireRole('broker'), changeListingStatus);
 router.delete('/:id', requireAuth, requireRole('broker'), deleteListing);
 router.post('/:id/boost', requireAuth, requireRole('broker'), boostListing);
 

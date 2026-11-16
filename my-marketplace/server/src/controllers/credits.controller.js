@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
+import { validateReceiptOwner, fileUrl, uploadFilename } from '../lib/uploads.js';
 import { serializeTransaction } from '../lib/serializers.js';
 import {
   CREDIT_PACKAGES,
@@ -7,11 +8,13 @@ import {
   PAYMENT_METHODS,
   PAYMENT_METHOD_IDS,
   VODAFONE_CASH_WALLET,
+  mockPaymentsEnabled,
 } from '../lib/credits.js';
 
 // Strip password before sending the user back.
 function publicUser(user) {
-  const { password, ...rest } = user;
+  const rest = { ...user };
+  delete rest.password;
   return rest;
 }
 
@@ -20,7 +23,8 @@ export function getPackages(_req, res) {
   res.json({
     success: true,
     packages: PACKAGE_IDS.map((id) => ({ id, ...CREDIT_PACKAGES[id] })),
-    methods: PAYMENT_METHOD_IDS,
+    methods: PAYMENT_METHOD_IDS.filter((id) => !PAYMENT_METHODS[id].instant || mockPaymentsEnabled()),
+    mock_payments_enabled: mockPaymentsEnabled(),
     vodafone_cash_wallet: VODAFONE_CASH_WALLET,
   });
 }
@@ -66,11 +70,21 @@ export async function purchaseCredits(req, res, next) {
     const { package: packageId, method } = parsed.data;
     const pkg = CREDIT_PACKAGES[packageId];
     const senderNumber = method === 'vodafone_cash' ? parsed.data.sender_number : null;
-    const receiptUrl = parsed.data.receipt_url || null;
+    await validateReceiptOwner(parsed.data.receipt_url, req.user.id);
+    const receiptUrl = parsed.data.receipt_url ? fileUrl(req, uploadFilename(parsed.data.receipt_url), true) : null;
 
     // Mock methods confirm instantly: create as completed and grant credits in
     // one atomic transaction so the two writes can't drift apart.
     if (PAYMENT_METHODS[method].instant) {
+      if (!mockPaymentsEnabled()) {
+        console.warn('Blocked mock payment attempt', { brokerId: req.user.id, method, packageId });
+        return res.status(403).json({
+          success: false,
+          code: 'MOCK_PAYMENTS_DISABLED',
+          message: 'Card/Fawry payments are unavailable without verified payment. Mock payments require NODE_ENV=development and ENABLE_MOCK_PAYMENTS=true.',
+          credits_added: 0,
+        });
+      }
       const [tx, user] = await prisma.$transaction([
         prisma.transaction.create({
           data: {

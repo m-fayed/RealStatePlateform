@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
-import { serializeTransaction } from '../lib/serializers.js';
+import { serializeTransaction, serializeListing } from '../lib/serializers.js';
 
 // Shape pending broker rows for the admin panel.
 function serializePendingBroker(user) {
@@ -242,4 +242,53 @@ export async function rejectTransaction(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+export async function listBrokers(_req, res, next) {
+  try {
+    const brokers = await prisma.user.findMany({
+      where: { role: 'broker' }, orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, phone: true, email: true, status: true },
+    });
+    res.json({ success: true, brokers });
+  } catch (error) { next(error); }
+}
+
+export async function setBrokerSuspension(req, res, next) {
+  try {
+    const parsed = z.object({ suspended: z.boolean() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, message: 'suspended must be a boolean' });
+    const status = parsed.data.suspended ? 'suspended' : 'active';
+    const previous = parsed.data.suspended ? 'active' : 'suspended';
+    const changed = await prisma.user.updateMany({
+      where: { id: req.params.id, role: 'broker', status: previous }, data: { status },
+    });
+    if (!changed.count) return res.status(409).json({ success: false, message: `Only ${previous} brokers can transition to ${status}` });
+    res.json({ success: true, broker: { id: req.params.id, status } });
+  } catch (error) { next(error); }
+}
+
+export async function listModerationListings(_req, res, next) {
+  try {
+    const rows = await prisma.listing.findMany({
+      where: { status: { not: 'deleted' } }, orderBy: { createdAt: 'desc' },
+      include: { broker: { select: { id: true, name: true, phone: true } } },
+    });
+    res.json({ success: true, listings: rows.map(serializeListing) });
+  } catch (error) { next(error); }
+}
+
+export async function moderateListing(req, res, next) {
+  try {
+    const parsed = z.object({ action: z.enum(['approve', 'reject', 'hide']), reason: z.string().trim().max(500).optional() }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, message: 'Invalid moderation action or reason' });
+    const statuses = { approve: 'approved', reject: 'rejected', hide: 'hidden' };
+    const updated = await prisma.listing.updateMany({
+      where: { id: req.params.id, status: { not: 'deleted' } },
+      data: { moderationStatus: statuses[parsed.data.action], moderationReason: parsed.data.action === 'approve' ? null : parsed.data.reason || null },
+    });
+    if (!updated.count) return res.status(404).json({ success: false, message: 'Listing not found' });
+    const row = await prisma.listing.findUnique({ where: { id: req.params.id } });
+    res.json({ success: true, listing: serializeListing(row) });
+  } catch (error) { next(error); }
 }

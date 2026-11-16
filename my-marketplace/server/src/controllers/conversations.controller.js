@@ -45,6 +45,7 @@ export async function listMyConversations(req, res, next) {
         buyer: true,
         broker: true,
         messages: { take: 1, orderBy: { createdAt: 'desc' } },
+        _count: { select: { messages: { where: { senderId: { not: req.user.id }, readAt: null } } } },
       },
       take: 100,
     });
@@ -70,7 +71,8 @@ export async function createOrFetchConversation(req, res, next) {
     const { listing_id } = parsed.data;
 
     const listing = await prisma.listing.findUnique({ where: { id: listing_id } });
-    if (!listing || listing.status === 'deleted') {
+    const broker = listing && await prisma.user.findUnique({ where: { id: listing.brokerId } });
+    if (!listing || listing.status !== 'active' || listing.moderationStatus !== 'approved' || broker.status !== 'active') {
       return res.status(404).json({ success: false, message: 'Listing not found' });
     }
     if (listing.brokerId === req.user.id) {
@@ -129,19 +131,32 @@ export async function getConversation(req, res, next) {
   }
 }
 
-// GET /api/conversations/:id/messages — ordered ascending (oldest first).
+// GET /api/conversations/:id/messages — newest first, stable keyset pagination.
 export async function listMessages(req, res, next) {
   try {
     const row = await loadParticipantConversation(req.params.id, req.user.id);
     if (row === null) return res.status(404).json({ success: false, message: 'Conversation not found' });
     if (row === false) return res.status(403).json({ success: false, message: 'Forbidden' });
 
-    const messages = await prisma.message.findMany({
-      where: { conversationId: row.id },
-      orderBy: { createdAt: 'asc' },
-      take: 500, // hard cap; pagination can be added later if needed
+    const query = z.object({ limit: z.coerce.number().int().min(1).max(50).default(50), cursor: z.string().min(1).optional() }).safeParse(req.query);
+    if (!query.success) return res.status(400).json({ success: false, message: 'Invalid cursor or limit (1–50)' });
+    const where = { conversationId: row.id };
+    if (query.data.cursor) {
+      const cursor = await prisma.message.findFirst({ where: { id: query.data.cursor, conversationId: row.id } });
+      if (!cursor) return res.status(400).json({ success: false, message: 'Invalid message cursor' });
+      where.OR = [{ createdAt: { lt: cursor.createdAt } }, { createdAt: cursor.createdAt, id: { lt: cursor.id } }];
+    }
+    const result = await prisma.$transaction(async (tx) => {
+      const rows = await tx.message.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: query.data.limit + 1 });
+      const hasMore = rows.length > query.data.limit;
+      const messages = rows.slice(0, query.data.limit);
+      const readAt = new Date();
+      const unread = messages.filter((message) => message.senderId !== req.user.id && !message.readAt);
+      await tx.message.updateMany({ where: { id: { in: unread.map((message) => message.id) }, readAt: null }, data: { readAt } });
+      for (const message of unread) message.readAt = readAt;
+      return { messages: messages.map(serializeMessage), has_more: hasMore, next_cursor: hasMore ? messages.at(-1).id : null };
     });
-    res.json({ success: true, messages: messages.map(serializeMessage) });
+    res.json({ success: true, ...result });
   } catch (err) {
     next(err);
   }

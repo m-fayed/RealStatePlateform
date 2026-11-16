@@ -2,6 +2,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import { serializeListing } from '../lib/serializers.js';
 import { resolveBoost, activeBoostRank } from '../lib/boost.js';
+import { spendCredits, InsufficientCreditsError } from '../lib/credits.js';
 
 const PROPERTY_TYPES = [
   'apartment', 'villa', 'duplex', 'penthouse', 'studio',
@@ -24,7 +25,7 @@ const createSchema = z.object({
   ad_license_no: z.string().trim().min(1).optional(),
 });
 
-const updateSchema = createSchema.partial();
+const updateSchema = createSchema.partial().extend({ images: z.array(z.string().url()).max(10).optional() });
 
 function formatZodError(err) {
   return err.issues.map((i) => `${i.path.join('.') || 'body'}: ${i.message}`).join(', ');
@@ -44,7 +45,7 @@ export async function listListings(req, res, next) {
       sort = 'newest',
     } = req.query;
 
-    const where = { status: 'active' };
+    const where = { status: 'active', moderationStatus: 'approved', broker: { status: 'active' } };
     if (city) where.city = String(city);
     if (property_type) where.propertyType = String(property_type);
     if (offer_type) where.offerType = String(offer_type);
@@ -91,8 +92,8 @@ export async function listListings(req, res, next) {
 export async function getListing(req, res, next) {
   try {
     const { id } = req.params;
-    const row = await prisma.listing.findUnique({
-      where: { id },
+    const row = await prisma.listing.findFirst({
+      where: { id, status: { not: 'deleted' }, moderationStatus: 'approved', broker: { status: 'active' } },
       include: { broker: { select: { id: true, name: true, phone: true } } },
     });
     if (!row || row.status === 'deleted') {
@@ -130,23 +131,10 @@ export async function createListing(req, res, next) {
       });
     }
 
-    // Credit check: each listing costs 1 credit. Cheap pre-check first.
-    if ((req.user.listingCredits ?? 0) <= 0) {
-      return res.status(403).json({
-        success: false,
-        code: 'NO_CREDITS',
-        message: 'No listing credits available. Please purchase a credit package to add more listings.',
-        credits: 0,
-      });
-    }
-
-    // Atomic decrement + create — if creation fails, the credit is not consumed.
-    const [, created] = await prisma.$transaction([
-      prisma.user.update({
-        where: { id: req.user.id },
-        data: { listingCredits: { decrement: 1 } },
-      }),
-      prisma.listing.create({
+    // Conditional debit and listing creation commit or roll back together.
+    const { created, creditsRemaining } = await prisma.$transaction(async (tx) => {
+      const creditsRemaining = await spendCredits(tx, req.user.id, 1);
+      const created = await tx.listing.create({
         data: {
           brokerId: req.user.id,
           title: data.title,
@@ -163,15 +151,19 @@ export async function createListing(req, res, next) {
           adLicenseNo,
         },
         include: { broker: { select: { id: true, name: true, phone: true } } },
-      }),
-    ]);
+      });
+      return { created, creditsRemaining };
+    });
 
     res.status(201).json({
       success: true,
       listing: serializeListing(created),
-      credits_remaining: Math.max(0, (req.user.listingCredits ?? 0) - 1),
+      credits_remaining: creditsRemaining,
     });
   } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return res.status(402).json({ success: false, code: err.code, message: err.message });
+    }
     next(err);
   }
 }
@@ -199,6 +191,7 @@ export async function updateListing(req, res, next) {
     if (d.description !== undefined) data.description = d.description;
     if (d.property_type !== undefined) data.propertyType = d.property_type;
     if (d.offer_type !== undefined) data.offerType = d.offer_type;
+    if (d.offer_type && d.offer_type !== existing.offerType && ['sold', 'rented'].includes(existing.status)) data.status = 'active';
     if (d.price !== undefined) data.price = d.price;
     if (d.city !== undefined) data.city = d.city;
     if (d.area !== undefined) data.area = d.area;
@@ -207,6 +200,8 @@ export async function updateListing(req, res, next) {
     if (d.floor !== undefined) data.floor = d.floor;
     if (d.images !== undefined) data.images = JSON.stringify(d.images);
     if (d.ad_license_no !== undefined) data.adLicenseNo = d.ad_license_no;
+    // Changes must be reviewed again and cannot undo a moderator's hidden state.
+    data.moderationStatus = existing.moderationStatus === 'hidden' ? 'hidden' : 'pending';
 
     const updated = await prisma.listing.update({
       where: { id },
@@ -218,6 +213,33 @@ export async function updateListing(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
+// GET /api/listings/mine — includes pending, hidden, sold and rented listings.
+export async function listMyListings(req, res, next) {
+  try {
+    const rows = await prisma.listing.findMany({
+      where: { brokerId: req.user.id, status: { not: 'deleted' } },
+      orderBy: { createdAt: 'desc' },
+      include: { broker: { select: { id: true, name: true, phone: true } } },
+    });
+    res.json({ success: true, listings: rows.map(serializeListing) });
+  } catch (error) { next(error); }
+}
+
+export async function changeListingStatus(req, res, next) {
+  try {
+    const parsed = z.object({ status: z.enum(['active', 'sold', 'rented']) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ success: false, message: 'Invalid listing status' });
+    const listing = await prisma.listing.findUnique({ where: { id: req.params.id } });
+    if (!listing || listing.status === 'deleted') return res.status(404).json({ success: false, message: 'Listing not found' });
+    if (listing.brokerId !== req.user.id) return res.status(403).json({ success: false, message: 'You do not own this listing' });
+    if ((parsed.data.status === 'sold' && listing.offerType !== 'sale') || (parsed.data.status === 'rented' && listing.offerType !== 'rent')) {
+      return res.status(400).json({ success: false, message: 'Status does not match the offer type' });
+    }
+    const updated = await prisma.listing.update({ where: { id: listing.id }, data: { status: parsed.data.status } });
+    res.json({ success: true, listing: serializeListing(updated) });
+  } catch (error) { next(error); }
 }
 
 // POST /api/listings/:id/boost — owner broker only.
@@ -252,24 +274,11 @@ export async function boostListing(req, res, next) {
       return res.status(403).json({ success: false, message: 'You do not own this listing' });
     }
 
-    if ((req.user.listingCredits ?? 0) < option.cost) {
-      return res.status(403).json({
-        success: false,
-        code: 'NOT_ENOUGH_CREDITS',
-        message: `Boost requires ${option.cost} credits. You have ${req.user.listingCredits ?? 0}.`,
-        required: option.cost,
-        credits: req.user.listingCredits ?? 0,
-      });
-    }
-
     const featuredUntil = new Date(Date.now() + option.durationDays * 24 * 60 * 60 * 1000);
 
-    const [, updated] = await prisma.$transaction([
-      prisma.user.update({
-        where: { id: req.user.id },
-        data: { listingCredits: { decrement: option.cost } },
-      }),
-      prisma.listing.update({
+    const { updated, creditsRemaining } = await prisma.$transaction(async (tx) => {
+      const creditsRemaining = await spendCredits(tx, req.user.id, option.cost);
+      const updated = await tx.listing.update({
         where: { id },
         data: {
           isFeatured: true,
@@ -277,8 +286,9 @@ export async function boostListing(req, res, next) {
           featuredUntil,
         },
         include: { broker: { select: { id: true, name: true, phone: true } } },
-      }),
-    ]);
+      });
+      return { updated, creditsRemaining };
+    });
 
     res.json({
       success: true,
@@ -288,9 +298,12 @@ export async function boostListing(req, res, next) {
         duration_days: option.durationDays,
         cost: option.cost,
       },
-      credits_remaining: Math.max(0, (req.user.listingCredits ?? 0) - option.cost),
+      credits_remaining: creditsRemaining,
     });
   } catch (err) {
+    if (err instanceof InsufficientCreditsError) {
+      return res.status(402).json({ success: false, code: err.code, message: err.message });
+    }
     next(err);
   }
 }

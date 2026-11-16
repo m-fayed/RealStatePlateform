@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
+import process from 'node:process';
+import { claimLicense, fileUrl, uploadFilename } from '../lib/uploads.js';
 
 const TOKEN_TTL = '7d';
 
@@ -15,7 +17,8 @@ function signToken(user) {
 
 // Strip password and other sensitive fields before sending a user to the client.
 function publicUser(user) {
-  const { password, ...rest } = user;
+  const rest = { ...user };
+  delete rest.password;
   return rest;
 }
 
@@ -25,7 +28,7 @@ const phoneSchema = z
   .min(7, 'Phone is too short')
   .max(20, 'Phone is too long');
 
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
+const passwordSchema = z.string().min(8, 'Password must be at least 8 characters').max(72);
 
 const seekerSchema = z.object({
   name: z.string().trim().min(2),
@@ -40,6 +43,7 @@ const brokerSchema = z.object({
   email: z.string().email(),
   password: passwordSchema,
   license_image_url: z.string().url(),
+  license_upload_token: z.string().min(1),
   ad_license_no: z.string().trim().min(1),
 });
 
@@ -90,7 +94,7 @@ export async function registerBroker(req, res, next) {
     if (!parsed.success) {
       return res.status(400).json({ success: false, message: formatZodError(parsed.error) });
     }
-    const { name, phone, email, password, license_image_url, ad_license_no } = parsed.data;
+    const { name, phone, email, password, license_image_url, license_upload_token, ad_license_no } = parsed.data;
 
     const existing = await prisma.user.findUnique({ where: { phone } });
     if (existing) {
@@ -98,7 +102,7 @@ export async function registerBroker(req, res, next) {
     }
 
     const hash = await bcrypt.hash(password, 10);
-    const user = await prisma.user.create({
+    const user = await claimLicense(license_image_url, license_upload_token, () => prisma.user.create({
       data: {
         name,
         phone,
@@ -106,10 +110,10 @@ export async function registerBroker(req, res, next) {
         password: hash,
         role: 'broker',
         status: 'pending',
-        licenseImageUrl: license_image_url,
+        licenseImageUrl: fileUrl(req, uploadFilename(license_image_url), true),
         adLicense: ad_license_no,
       },
-    });
+    }));
 
     // No token yet — broker can't log in until admin approves.
     return res.status(201).json({

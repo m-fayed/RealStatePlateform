@@ -7,6 +7,10 @@ import {
   listTransactions,
   approveTransaction,
   rejectTransaction,
+  listBrokers,
+  setBrokerSuspension,
+  listModerationListings,
+  moderateListing,
 } from '../controllers/admin.controller.js';
 import { requireAuth, requireRole } from '../middleware/auth.middleware.js';
 
@@ -19,6 +23,10 @@ router.get('/registrations', listPendingRegistrations);
 router.post('/registrations/:id/approve', approveRegistration);
 router.post('/registrations/:id/reject', rejectRegistration);
 router.get('/statistics', getStatistics);
+router.get('/brokers', listBrokers);
+router.patch('/brokers/:id/suspension', setBrokerSuspension);
+router.get('/listings', listModerationListings);
+router.patch('/listings/:id/moderation', moderateListing);
 
 // Credit-purchase requests.
 router.get('/transactions', listTransactions);

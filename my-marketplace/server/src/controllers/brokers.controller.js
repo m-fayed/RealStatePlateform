@@ -15,7 +15,7 @@ export async function getBrokerProfile(req, res, next) {
     }
 
     const listings = await prisma.listing.findMany({
-      where: { brokerId: id, status: 'active' },
+      where: { brokerId: id, status: 'active', moderationStatus: 'approved' },
       orderBy: { createdAt: 'desc' },
       include: { broker: { select: { id: true, name: true, phone: true } } },
     });

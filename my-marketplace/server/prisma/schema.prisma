@@ -54,6 +54,8 @@ model Listing {
   images       String   @default("[]") // JSON-encoded array of URL strings (SQLite has no array type)
   adLicenseNo  String
   status       String   @default("active") // active | sold | rented | deleted
+  moderationStatus String @default("pending") // pending | approved | rejected | hidden
+  moderationReason String?
   viewsCount   Int      @default(0)
   isFeatured   Boolean  @default(false)
   featureType  String?  // "top" | "badge" | "premium" | null

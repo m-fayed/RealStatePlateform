@@ -32,6 +32,7 @@ export default function Auth() {
     name: '',
     email: '',
     license_image_url: '',
+    license_upload_token: '',
     ad_license_no: ''
   });
 
@@ -91,6 +92,7 @@ export default function Auth() {
         email: formData.email,
         password: formData.password,
         license_image_url: formData.license_image_url,
+        license_upload_token: formData.license_upload_token,
         ad_license_no: formData.ad_license_no
       });
       if (response.data.success) {
@@ -265,7 +267,7 @@ export default function Auth() {
                 </div>
                 <div>
                   <label className="label-base">كلمة المرور</label>
-                  <input type="password" name="password" value={formData.password} onChange={handleChange} placeholder="••••••••" required className="input-base" />
+                  <input type="password" name="password" value={formData.password} onChange={handleChange} placeholder="••••••••" minLength={8} maxLength={72} required className="input-base" />
                 </div>
                 <button type="submit" disabled={loading} className="btn-brand btn-lg w-full">
                   {loading ? 'جاري التسجيل...' : 'إنشاء الحساب'}
@@ -294,11 +296,12 @@ export default function Auth() {
                 </div>
                 <div>
                   <label className="label-base">كلمة المرور</label>
-                  <input type="password" name="password" value={formData.password} onChange={handleChange} placeholder="••••••••" required className="input-base" />
+                  <input type="password" name="password" value={formData.password} onChange={handleChange} placeholder="••••••••" minLength={8} maxLength={72} required className="input-base" />
                 </div>
                 <LicenseUploadField
                   value={formData.license_image_url}
                   onChange={(url) => setFormData((prev) => ({ ...prev, license_image_url: url }))}
+                  onTokenChange={(token) => setFormData((prev) => ({ ...prev, license_upload_token: token }))}
                 />
                 <div>
                   <label className="label-base">رقم رخصة الإعلان</label>
