@@ -1,76 +1,31 @@
-# نموذج قاعدة البيانات
+# Current database schema
 
-## جداول قاعدة البيانات الأساسية
+Authoritative source: `my-marketplace/server/prisma/schema.prisma` and `prisma/migrations/`. Provider: **SQLite**, accessed through Prisma 6; connection is `DATABASE_URL` (example `file:./dev.db`, relative to the Prisma schema directory). Apply migrations with `npx prisma migrate deploy` from `my-marketplace/server`, then generate the client with `npx prisma generate`.
 
-### 1. جدول Users (المستخدمين)
-```sql
-CREATE TABLE users (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL,
-  phone VARCHAR(20) UNIQUE NOT NULL,
-  email VARCHAR(255) UNIQUE,
-  password_hash VARCHAR(255) NOT NULL,
-  role ENUM('broker', 'seeker', 'admin') NOT NULL,
-  status ENUM('pending', 'active', 'rejected', 'suspended') DEFAULT 'pending',
-  license_image_url VARCHAR(500),
-  ad_license_no VARCHAR(100),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+There are five models. IDs are UUID strings. Roles, statuses, and methods are application-validated strings, not database enums. Timestamps use Prisma DateTime; all models have createdAt/updatedAt except Message, which has createdAt only.
 
-### 2. جدول Listings (الإعلانات)
-```sql
-CREATE TABLE listings (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  broker_id UUID NOT NULL REFERENCES users(id),
-  title VARCHAR(255) NOT NULL,
-  property_type VARCHAR(50) NOT NULL,
-  offer_type ENUM('sale', 'rent') NOT NULL,
-  price DECIMAL(15, 2) NOT NULL,
-  city VARCHAR(100) NOT NULL,
-  area VARCHAR(100) NOT NULL,
-  size_sqm DECIMAL(10, 2),
-  rooms INT,
-  floor INT,
-  description TEXT,
-  ad_license_no VARCHAR(100) NOT NULL,
-  status ENUM('active', 'sold', 'rented', 'deleted') DEFAULT 'active',
-  views_count INT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+| Model | Stored fields and constraints |
+| --- | --- |
+| User | id; name; unique phone; optional nonunique email; bcrypt password hash; role; status (default active); listingCredits integer default 0; optional licenseImageUrl, adLicense, rejectionReason; timestamps. Index: role/status. |
+| Listing | id; brokerId FK; title; propertyType; offerType; price Float; city; optional area, sizeSqm Float, rooms Int, floor Int, description; images as JSON-encoded String default `[]`; adLicenseNo; status default active; moderationStatus default pending; optional moderationReason; viewsCount default 0; isFeatured default false; optional featureType/featuredUntil; timestamps. Indexes: status/createdAt, city, propertyType, offerType. |
+| Conversation | id; listingId, buyerId, brokerId FKs; timestamps. Unique listingId/buyerId; indexes buyerId/updatedAt and brokerId/updatedAt. Broker is copied from listing at creation. |
+| Message | id; conversationId and senderId FKs; body; nullable readAt; createdAt. Index conversationId/createdAt. |
+| Transaction | id; brokerId FK; packageId, amount Float (EGP), credits Int snapshot; method; status default pending; optional senderNumber, receiptUrl, rejectionReason, reviewedById, reviewedAt; timestamps. Indexes status/createdAt and brokerId/createdAt. reviewedById is a string, not a foreign key. |
 
-### 3. جدول ListingImages (صور الإعلانات)
-```sql
-CREATE TABLE listing_images (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
-  image_url VARCHAR(500) NOT NULL,
-  display_order INT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+All declared relations cascade on deletion. User owns listings and transactions, participates in conversations as buyer/broker, and sends messages. Listing has conversations; Conversation has messages. There are no separate ListingImages or Notifications tables.
 
-### 4. جدول Notifications (الإشعارات)
-```sql
-CREATE TABLE notifications (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id),
-  type VARCHAR(50) NOT NULL,
-  message TEXT NOT NULL,
-  data JSONB,
-  is_read BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+## State and transaction rules
 
----
+- User roles: seeker, broker, admin; account statuses: pending, active, rejected, suspended. Brokers require review; suspended accounts cannot use protected APIs.
+- Listing lifecycle status: active, sold, rented, deleted. Moderation is separate: pending, approved, rejected, hidden. Public collection requires active status, approved moderation, and active broker. Detail can display sold/rented listings. Deletion via API is soft deletion.
+- Credit purchases use pending/completed/rejected transactions. Vodafone Cash approval conditionally changes pending to completed and increments credits in the same transaction. Repeated approval cannot grant again. Card/Fawry mocks require explicit development flags; there is no real gateway.
+- Listing creation and boosting conditionally decrement credits only when balance covers cost, within the same transaction as the listing mutation. Failed debit rolls back everything. Transaction rows represent purchases, not a complete spending ledger.
+- readAt records receipt of incoming messages returned by the message API. Cursor pagination sorts createdAt/id descending; one conversation exists per listing/buyer.
 
-## الخطوات التالية
+## Files, migrations, and limitations
 
-1. إنشاء database في PostgreSQL
-2. تشغيل هذه الـ queries
-3. إضافة Migrations في Backend
-4. إضافة Seeds للبيانات الاختبارية
+Photos reside under `server/uploads/public`; licenses/receipts and ownership metadata under `server/uploads/private`. Database fields store URLs, not binary content. Backups must include both the SQLite database and uploads. Do not commit runtime databases or private documents.
+
+Use checked-in migrations for existing databases; do not replace them with schema push in release automation. Tests migrate disposable SQLite databases rather than modifying the developer database. Seed requires explicit ADMIN_EMAIL and a strong ADMIN_PASSWORD; no predictable password is supplied or printed.
+
+Money currently uses Float, not fixed decimal/minor-unit integers. Strings rely on Zod/controller validation rather than database enum/check constraints. Rate limiting is process-local, and file/database operations are not one atomic storage transaction. These are deployment considerations, not production-readiness guarantees. See [API](API_DOCUMENTATION.md) and [application README](my-marketplace/README.md).
