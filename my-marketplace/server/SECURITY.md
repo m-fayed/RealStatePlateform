@@ -56,3 +56,43 @@ separately; moving files cannot revoke previously downloaded copies.
 Run security regressions with:
 
     node --test src/security.test.js
+
+## Durable storage and offline recovery
+
+Production must use absolute paths on persistent mounted storage, for example
+`DATABASE_URL=file:/var/lib/marketplace/pilot.db` and
+`UPLOADS_DIR=/var/lib/marketplace/uploads` (Windows:
+`file:D:/marketplace-data/pilot.db` and `D:/marketplace-data/uploads`).
+Relative database paths are relative to `server/prisma`; default database and
+upload locations inside the checkout are development-only. Startup emits
+`[STORAGE WARNING]` for checkout-local and recognizable temporary/cache paths.
+Warnings are heuristic, not proof of mount durability; confirm persistence
+across redeploys, container replacement and machine restarts yourself.
+
+From `server/`, after stopping the API, cleanup and all other writers:
+
+```sh
+npm run backup -- D:/marketplace-backups --offline
+npm run restore -- D:/marketplace-backups/<timestamp-uuid> --offline
+```
+
+In Windows PowerShell, use `npm.cmd` instead of `npm` to preserve CLI flags.
+
+Use the exact folder printed by backup. `--offline` is an explicit acknowledgement
+that writers are stopped, not an automatic process lock. Backups use a SQLite
+snapshot (including committed WAL transactions), the entire uploads tree and a
+checksum manifest. Never back up database and uploads at different times while
+writers run. The backup root must be outside live data; use separate durable
+storage outside the deployment checkout and replicate completed snapshots off-host.
+Restrict backup access: private documents, ownership metadata and password hashes
+are included. Checksums detect accidental corruption, not malicious modification.
+
+Configure the destination host's environment before restoring. Restore validates
+all checksums and SQLite integrity and refuses to overwrite the database, its
+`-wal`/`-shm`/`-journal` sidecars, or uploads directory. With writers stopped,
+move existing live storage to a safe holding location first. Keep it until the
+recovery is verified; interrupted restore output must also be moved aside before
+retrying. Restart only after both database and uploads have restored successfully.
+Use the matching application version before applying later migrations.
+See the README for the full recovery procedure. `npm test` runs a real CLI
+backup/delete/restore regression covering SQLite rows and public/private files.

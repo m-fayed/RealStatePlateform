@@ -7,8 +7,10 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "lint": "eslint .",
-    "test": "node --test src/api.test.js src/security.test.js src/workflows.test.js src/controllers/credits.controller.test.js src/controllers/listings.concurrency.test.js",
-    "seed": "node prisma/seed.js"
+    "test": "node --test src/api.test.js src/security.test.js src/workflows.test.js src/storage.test.js src/controllers/credits.controller.test.js src/controllers/listings.concurrency.test.js",
+    "seed": "node prisma/seed.js",
+    "backup": "node scripts/storage.js backup",
+    "restore": "node scripts/storage.js restore"
   },
   "engines": { "node": ">=22.14.0" },
   "dependencies": {

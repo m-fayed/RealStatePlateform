@@ -131,6 +131,56 @@ requests. Passing local tests does not mean the hosted workflow has already run.
 
 ## Deployment limits
 
+### Durable SQLite storage and recovery
+
+Set `DATABASE_URL` to an absolute SQLite file on a persistent mounted volume
+(for example `file:/var/lib/marketplace/pilot.db` or
+`file:D:/marketplace-data/pilot.db`) and `UPLOADS_DIR` to an absolute directory
+on that volume (`/var/lib/marketplace/uploads` or `D:/marketplace-data/uploads`).
+Relative SQLite paths resolve from `server/prisma`; the development defaults
+are checkout-local and are not suitable for durable deployment. Startup prints
+`[STORAGE WARNING]` for checkout-local or known temporary/cache locations.
+This is a path heuristic: it cannot establish whether a host/container volume
+survives replacement. Verify the mount's persistence with your host.
+
+Run these commands from the project root with Node 22.14+. **Stop the API,
+cleanup jobs and every other database/upload writer first**, and keep them
+stopped until backup or restore finishes. `--offline` acknowledges that
+requirement; the commands cannot stop external writers for you. A SQLite
+`VACUUM INTO` snapshot includes committed WAL data, while an offline window
+keeps that snapshot consistent with uploaded files and private metadata.
+
+```sh
+npm run backup --prefix server -- D:/marketplace-backups --offline
+# Use the exact timestamped folder printed by backup:
+npm run restore --prefix server -- D:/marketplace-backups/<timestamp-uuid> --offline
+```
+
+In Windows PowerShell, use `npm.cmd` in place of `npm` for these commands so
+the PowerShell npm shim preserves `--offline` and the argument separator.
+
+Choose a backup root outside both the live database path and uploads tree,
+on separate durable storage outside the checkout. Every backup creates a unique
+timestamped folder containing `database.sqlite`, `uploads/` and a SHA-256
+manifest; incomplete backups retain no published snapshot. Copy completed
+snapshots to another device/service, protect access (they include private
+documents and account data), and apply your own retention policy.
+
+Restore reads the current `server/.env`/environment, so it can recover to a new
+host and different absolute paths. It validates checksums and SQLite integrity
+before writing and refuses existing database files, SQLite sidecars or uploads.
+Move any existing database, `-wal`, `-shm`, `-journal` files and entire uploads
+directory to a safe holding location first; do not discard your only copy.
+For an empty/new host, just provision the durable parent directories and set
+the environment. After restore succeeds, restart the API with the same storage
+configuration and verify its data and files. If a restore is interrupted, move
+its partial live output aside before retrying. Restore does not migrate schemas;
+use the application version matching the backup, then follow normal migrations.
+
+`npm test --prefix server` includes a real CLI recovery drill: create SQLite
+rows and public/private files, back up, delete live storage, restore and verify
+the recovered bytes and rows. It also tests overwrite and corruption rejection.
+
 Use persistent storage and back up SQLite and uploads together. Rate limits are
 process-local (five failed logins and twenty uploads per IP per fifteen minutes);
 multiple instances need a shared limiter. Configure trusted reverse proxies

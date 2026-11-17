@@ -3,8 +3,10 @@ import app from './app.js';
 import process from 'node:process';
 import { validateStartupConfig } from './lib/security.js';
 import { initializeUploads, cleanupOrphanUploads } from './lib/uploads.js';
+import { warnStorage } from './lib/storage.js';
 
 validateStartupConfig();
+warnStorage();
 await initializeUploads();
 await cleanupOrphanUploads();
 let cleaning = false;
